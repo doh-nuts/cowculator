@@ -1,4 +1,4 @@
-import { Flex, Loader, NumberInput, Table, Title } from "@mantine/core";
+import { Flex, Group, Loader, NumberInput, Table, Title } from "@mantine/core";
 import { ApiData } from "../services/ApiService";
 import { Cost, ItemDetail } from "../models/Client";
 import { MarketValue } from "../models/Market";
@@ -32,6 +32,7 @@ export default function EnhancingCalc({
   const toolBonus = toolPercent * 0.01;
   const action = data.actionDetails["/actions/enhancing/enhance"];
   const [protCostOverride, setProtCostOverride] = useState<number | "">("");
+  const [gphCommission, setGphCommission] = useState<number | "">("");
   const [priceOverrides, setPriceOverrides] = useState<{
     [key: string]: number | "";
   }>({});
@@ -135,6 +136,8 @@ export default function EnhancingCalc({
       if (acc === -1 || cost < acc) return cost;
       return acc;
     }, -1);
+  var protectionCostP1 = protectionCost * 2.0;
+  var protectionCostM1 = protectionCost * 0.5;
 
   const pCol = TARGET_COL.map((x) => (x === 0 ? 0 : X(x - 1)));
   const sCol = TARGET_COL.map((x) => S(x));
@@ -154,39 +157,68 @@ export default function EnhancingCalc({
     return acc;
   }, []);
 
-  const inflectionCol: number[] = TARGET_COL.reduce((acc: number[], x) => {
-    if (x <= 1) {
-      acc.push(costCol[x]);
-    } else {
-      const back = acc[acc.length - 1];
-      const back2 = acc[acc.length - 2];
-      const newValue = Math.min(
-        costCol[x],
-        (back +
-          (protectionCost * (1 - pCol[x]) + costPerEnhance) -
-          (1 - pCol[x]) * back2) /
-          pCol[x]
-      );
-      acc.push(newValue);
-    }
-    return acc;
-  }, []);
+  
+  function CalculateInflection(protCost: number) {
+    return TARGET_COL.reduce((acc: number[], x) => {
+      if (x <= 1) {
+        acc.push(costCol[x]);
+      } else {
+        const back = acc[acc.length - 1];
+        const back2 = acc[acc.length - 2];
+        const newValue = Math.min(
+          costCol[x],
+          (back +
+            (protCost * (1 - pCol[x]) + costPerEnhance) -
+            (1 - pCol[x]) * back2) /
+            pCol[x]
+        );
+        acc.push(newValue);
+      }
+      return acc;
+    }, []);
+  }
 
+  const inflectionCol: number[] = CalculateInflection(protectionCost);
   const protLevel = costCol.findLastIndex((x, i) => x <= inflectionCol[i]);
-  const actionsCol = TARGET_COL.reduce((acc: number[], x) => {
-    if (x <= protLevel) {
-      acc.push(costCol[x] / costPerEnhance);
-    } else {
-      const back = acc[acc.length - 1];
-      const back2 = acc[acc.length - 2];
-      acc.push((back + 1 - (1 - pCol[x]) * back2) / pCol[x]);
-    }
-    return acc;
-  }, []);
 
-  const protUsedCol = TARGET_COL.map(
-    (x) => (inflectionCol[x] - actionsCol[x] * costPerEnhance) / protectionCost
-  );
+  var inflectionColP1: number[] = CalculateInflection(protectionCostP1);
+  var protLevelP1 = costCol.findLastIndex((x, i) => x <= inflectionColP1[i]);
+  while(protLevelP1 < protLevel + 1)
+  {
+    protectionCostP1 *= 2.0;
+    inflectionColP1 = CalculateInflection(protectionCostP1);
+    protLevelP1 = costCol.findLastIndex((x, i) => x <= inflectionColP1[i]);
+  }
+  
+  var inflectionColM1: number[] = CalculateInflection(protectionCostM1);
+  var protLevelM1 = costCol.findLastIndex((x, i) => x <= inflectionColM1[i]);
+  while(protLevelM1 > protLevel - 1 && protLevel > 2)
+  {
+    protectionCostM1 *= 0.5;
+    inflectionColM1 = CalculateInflection(protectionCostM1);
+    protLevelM1 = costCol.findLastIndex((x, i) => x <= inflectionColM1[i]);
+  }
+
+  function CalculateActions(protectionLevel: number) {
+    return TARGET_COL.reduce((acc: number[], x) => {
+      if (x <= protectionLevel) {
+        acc.push(costCol[x] / costPerEnhance);
+      } else {
+        const back = acc[acc.length - 1];
+        const back2 = acc[acc.length - 2];
+        acc.push((back + 1 - (1 - pCol[x]) * back2) / pCol[x]);
+      }
+      return acc;
+    }, []);
+  }
+
+  const actionsCol = CalculateActions(protLevel);
+  const actionsColP1 = CalculateActions(protLevelP1);
+  const actionsColM1 = CalculateActions(protLevelM1);
+
+  const protUsedCol   = TARGET_COL.map((x) => (inflectionCol  [x] - actionsCol  [x] * costPerEnhance) / protectionCost);
+  const protUsedColP1 = TARGET_COL.map((x) => (inflectionColP1[x] - actionsColP1[x] * costPerEnhance) / protectionCostP1);
+  const protUsedColM1 = TARGET_COL.map((x) => (inflectionColM1[x] - actionsColM1[x] * costPerEnhance) / protectionCostM1);
 
   const criticalCol = TARGET_COL.reduce((acc: number[], x) => {
     if (x <= 1 || blessedTeaBonus === 0) {
@@ -204,11 +236,17 @@ export default function EnhancingCalc({
     return acc;
   }, []);
 
-  const expectedCostCol = TARGET_COL.map(
-    (x) => inflectionCol[x] / criticalCol[x]
-  );
+  const expectedCostCol   = TARGET_COL.map((x) => inflectionCol  [x] / criticalCol[x]);
+  const expectedCostColP1 = TARGET_COL.map((x) => inflectionColP1[x] / criticalCol[x] - protectionCost * protUsedColP1[x]);
+  const expectedCostColM1 = TARGET_COL.map((x) => inflectionColM1[x] / criticalCol[x] + protectionCost * 0.5 * protUsedColM1[x]);
 
   const cost = expectedCostCol[target];
+  const costP1 = expectedCostColP1[target];
+  const costM1 = expectedCostColM1[target];
+
+  const commissionCost   = expectedCostCol  [target] + gphCommission / 3600 * actionsCol  [target] * actionTimer;
+  const commissionCostP1 = expectedCostColP1[target] + gphCommission / 3600 * actionsColP1[target] * actionTimer;
+  const commissionCostM1 = expectedCostColM1[target] + gphCommission / 3600 * actionsColM1[target] * actionTimer;
 
   const sample = [
     ...Array(data.enhancementLevelSuccessRateTable.length).keys(),
@@ -318,14 +356,24 @@ export default function EnhancingCalc({
       direction="column"
       wrap="wrap"
     >
-      <NumberInput
-        label="Protection Cost"
-        hideControls
-        placeholder={getFriendlyIntString(protectionCost)}
-        min={1}
-        value={protCostOverride}
-        onChange={setProtCostOverride}
-      />
+      <Group>
+        <NumberInput
+          label="Protection Cost"
+          hideControls
+          placeholder={getFriendlyIntString(protectionCost)}
+          min={1}
+          value={protCostOverride}
+          onChange={setProtCostOverride}
+        />
+        <NumberInput
+          label="Gold/Hour Commission"
+          hideControls
+          placeholder={0}
+          min={1}
+          value={gphCommission}
+          onChange={setGphCommission}
+        />
+      </Group>
       <Flex gap="lg">
         <Flex direction="column">
           <Title order={4}>Enhancement Costs</Title>
@@ -379,6 +427,12 @@ export default function EnhancingCalc({
               <td>{averageEnhanceXp.toFixed(2)}</td>
             </tr>
             <tr>
+              <th>Average Total xp</th>
+              <td>
+                {getFriendlyIntString(actionsCol[target] * averageEnhanceXp)}
+              </td>
+            </tr>
+            <tr>
               <th>coin/xp</th>
               <td>
                 {getFriendlyIntString(costPerEnhance / averageEnhanceXp, 2)}
@@ -392,18 +446,31 @@ export default function EnhancingCalc({
             </tr>
             <tr>
               <th>Prot Level</th>
+              <td>{protLevelM1}</td>
               <td>{protLevel}</td>
+              <td>{protLevelP1}</td>
             </tr>
             <tr>
               <th>Prots Used</th>
+              <td>{protUsedColM1[target].toFixed(2)}</td>
               <td>{protUsedCol[target].toFixed(2)}</td>
+              <td>{protUsedColP1[target].toFixed(2)}</td>
             </tr>
             <tr>
               <th>Average Actions</th>
+              <td>{getFriendlyIntString(actionsColM1[target], 2)}</td>
               <td>{getFriendlyIntString(actionsCol[target], 2)}</td>
+              <td>{getFriendlyIntString(actionsColP1[target], 2)}</td>
             </tr>
             <tr>
               <th>Average Time</th>
+              <td>
+                {Duration.fromObject({
+                  seconds: actionsColM1[target] * actionTimer,
+                })
+                  .shiftTo("hours", "minutes", "seconds")
+                  .toHuman()}
+              </td>
               <td>
                 {Duration.fromObject({
                   seconds: actionsCol[target] * actionTimer,
@@ -411,16 +478,25 @@ export default function EnhancingCalc({
                   .shiftTo("hours", "minutes", "seconds")
                   .toHuman()}
               </td>
+              <td>
+                {Duration.fromObject({
+                  seconds: actionsColP1[target] * actionTimer,
+                })
+                  .shiftTo("hours", "minutes", "seconds")
+                  .toHuman()}
+              </td>
             </tr>
             <tr>
               <th>Average Cost</th>
+              <td>{getFriendlyIntString(costM1)}</td>
               <td>{getFriendlyIntString(cost)}</td>
+              <td>{getFriendlyIntString(costP1)}</td>
             </tr>
             <tr>
-              <th>Average Total xp</th>
-              <td>
-                {getFriendlyIntString(actionsCol[target] * averageEnhanceXp)}
-              </td>
+              <th>Commissioned Cost</th>
+              <td>{getFriendlyIntString(commissionCostM1)}</td>
+              <td>{getFriendlyIntString(commissionCost)}</td>
+              <td>{getFriendlyIntString(commissionCostP1)}</td>
             </tr>
           </tbody>
         </Table>
@@ -439,6 +515,16 @@ export default function EnhancingCalc({
             <th>Protections</th>
             <th>Critical</th>
             <th>Average Cost</th>
+            <th></th>
+            <th>Inflection +1</th>
+            <th>Actions +1</th>
+            <th>Protections +1</th>
+            <th>Cost +1</th>
+            <th></th>
+            <th>Inflection -1</th>
+            <th>Actions -1</th>
+            <th>Protections -1</th>
+            <th>Cost -1</th>
           </tr>
         </thead>
         <tbody>
@@ -456,6 +542,16 @@ export default function EnhancingCalc({
                 <td>{getFriendlyIntString(protUsedCol[x], 2)}</td>
                 <td>{criticalCol[x].toFixed(4)}</td>
                 <td>{getFriendlyIntString(expectedCostCol[x])}</td>
+                <td>{"_____"}</td>
+                <td>{getFriendlyIntString(inflectionColP1[x])}</td>
+                <td>{getFriendlyIntString(actionsColP1[x], 2)}</td>
+                <td>{getFriendlyIntString(protUsedColP1[x], 2)}</td>
+                <td>{getFriendlyIntString(expectedCostColP1[x])}</td>
+                <td>{"_____"}</td>
+                <td>{getFriendlyIntString(inflectionColM1[x])}</td>
+                <td>{getFriendlyIntString(actionsColM1[x], 2)}</td>
+                <td>{getFriendlyIntString(protUsedColM1[x], 2)}</td>
+                <td>{getFriendlyIntString(expectedCostColM1[x])}</td>
               </tr>
             );
           })}
