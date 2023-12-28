@@ -244,7 +244,7 @@ export default function EnhancingCalc({
   const costP1 = expectedCostColP1[target];
   const costM1 = expectedCostColM1[target];
 
-  const gphCommissionNumber: number = gphCommission;
+  const gphCommissionNumber: number = gphCommission || 0;
   const commissionCost   = expectedCostCol  [target] + gphCommissionNumber / 3600 * actionsCol  [target] * actionTimer;
   const commissionCostP1 = expectedCostColP1[target] + gphCommissionNumber / 3600 * actionsColP1[target] * actionTimer;
   const commissionCostM1 = expectedCostColM1[target] + gphCommissionNumber / 3600 * actionsColM1[target] * actionTimer;
@@ -369,7 +369,7 @@ export default function EnhancingCalc({
         <NumberInput
           label="Gold/Hour Commission"
           hideControls
-          placeholder={getFriendlyIntString(0)}
+          placeholder={"0"}
           min={0}
           value={gphCommission}
           onChange={setGphCommission}
